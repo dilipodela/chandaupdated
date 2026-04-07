@@ -20,10 +20,15 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     // Check for existing session on mount
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session) {
-        console.log('Session found on mount')
-        setIsRecoveryMode(true)
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession()
+        if (error) console.error('Session check error:', error)
+        if (session) {
+          console.log('Session found on mount:', session.user.email)
+          setIsRecoveryMode(true)
+        }
+      } catch (err) {
+        console.error('Failed to get session:', err)
       }
     }
     
@@ -31,15 +36,27 @@ export default function ResetPasswordPage() {
 
     // Listen for auth state changes
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth event:', event)
+      console.log('Auth event changed:', event, session ? 'with session' : 'no session')
       if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || session) {
         setIsRecoveryMode(true)
       }
     })
 
-    // Fallback: If we have a recovery hash in the URL, try to set recovery mode
-    if (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) {
-      setIsRecoveryMode(true)
+    // Fallback: Check URL for recovery tokens (Hash or Query Params)
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash
+      const search = window.location.search
+      console.log('Checking URL for tokens... Hash:', hash ? 'Present' : 'Empty', 'Search:', search ? 'Present' : 'Empty')
+      
+      if (
+        hash.includes('type=recovery') || 
+        hash.includes('access_token=') || 
+        search.includes('type=recovery') ||
+        search.includes('code=') // PKCE flow
+      ) {
+        console.log('Recovery-related tokens detected in URL')
+        setIsRecoveryMode(true)
+      }
     }
 
     return () => {
