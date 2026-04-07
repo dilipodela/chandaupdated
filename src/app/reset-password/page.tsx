@@ -8,56 +8,62 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { Eye, EyeOff } from 'lucide-react'
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [isRecoveryMode, setIsRecoveryMode] = useState(false)
+  const [sessionChecked, setSessionChecked] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
   useEffect(() => {
-    // Check for existing session on mount
-    const checkSession = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession()
-        if (error) console.error('Session check error:', error)
-        if (session) {
-          console.log('Session found on mount:', session.user.email)
-          setIsRecoveryMode(true)
-        }
-      } catch (err) {
-        console.error('Failed to get session:', err)
+    const handleAuth = async () => {
+      // 1. Check for existing session
+      const { data: { session: existingSession } } = await supabase.auth.getSession()
+      if (existingSession) {
+        setIsRecoveryMode(true)
+        setSessionChecked(true)
+        return
       }
-    }
-    
-    checkSession()
 
-    // Listen for auth state changes
+      // 2. Check URL for tokens and manually set session if found
+      if (typeof window !== 'undefined') {
+        const hash = window.location.hash.substring(1)
+        const params = new URLSearchParams(hash || window.location.search)
+        const accessToken = params.get('access_token')
+        const refreshToken = params.get('refresh_token')
+        const type = params.get('type')
+
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          })
+          if (!error) {
+            setIsRecoveryMode(true)
+          } else {
+            console.error('Error setting session from URL:', error)
+          }
+        } else if (type === 'recovery' || params.has('code')) {
+           // If we have signs of recovery but tokens haven't processed yet, wait a bit
+           setIsRecoveryMode(true)
+        }
+      }
+      setSessionChecked(true)
+    }
+
+    handleAuth()
+
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth event changed:', event, session ? 'with session' : 'no session')
+      console.log('Auth event change:', event)
       if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || session) {
         setIsRecoveryMode(true)
       }
     })
-
-    // Fallback: Check URL for recovery tokens (Hash or Query Params)
-    if (typeof window !== 'undefined') {
-      const hash = window.location.hash
-      const search = window.location.search
-      console.log('Checking URL for tokens... Hash:', hash ? 'Present' : 'Empty', 'Search:', search ? 'Present' : 'Empty')
-      
-      if (
-        hash.includes('type=recovery') || 
-        hash.includes('access_token=') || 
-        search.includes('type=recovery') ||
-        search.includes('code=') // PKCE flow
-      ) {
-        console.log('Recovery-related tokens detected in URL')
-        setIsRecoveryMode(true)
-      }
-    }
 
     return () => {
       authListener.subscription.unsubscribe()
@@ -73,6 +79,14 @@ export default function ResetPasswordPage() {
     }
 
     setLoading(true)
+
+    // Verify session actually exists right now
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      toast.error('Auth session missing! Please click the link in your email again.')
+      setLoading(false)
+      return
+    }
 
     const { error } = await supabase.auth.updateUser({
       password: password
@@ -100,29 +114,42 @@ export default function ResetPasswordPage() {
         <CardContent>
           {!isRecoveryMode ? (
             <p className="text-sm text-yellow-600 text-center py-4 bg-yellow-50 dark:bg-yellow-900/20 dark:text-yellow-400 rounded-md">
-              Waiting for recovery session... If nothing happens, your link may be invalid.
+              Waiting for recovery session... If nothing happens, your link may be invalid or expired.
             </p>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium leading-none" htmlFor="password">New Password</label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium leading-none" htmlFor="confirmPassword">Confirm Password</label>
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                />
+                <div className="relative">
+                  <Input
+                    id="confirmPassword"
+                    type={showPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    className="pr-10"
+                  />
+                </div>
               </div>
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? 'Updating...' : 'Update Password'}
@@ -139,3 +166,4 @@ export default function ResetPasswordPage() {
     </div>
   )
 }
+
