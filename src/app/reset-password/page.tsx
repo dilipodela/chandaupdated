@@ -18,17 +18,29 @@ export default function ResetPasswordPage() {
   const supabase = createClient()
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Check for existing session on mount
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
       if (session) {
+        console.log('Session found on mount')
+        setIsRecoveryMode(true)
+      }
+    }
+    
+    checkSession()
+
+    // Listen for auth state changes
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth event:', event)
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || session) {
         setIsRecoveryMode(true)
       }
     })
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
-        setIsRecoveryMode(true)
-      }
-    })
+    // Fallback: If we have a recovery hash in the URL, try to set recovery mode
+    if (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) {
+      setIsRecoveryMode(true)
+    }
 
     return () => {
       authListener.subscription.unsubscribe()
